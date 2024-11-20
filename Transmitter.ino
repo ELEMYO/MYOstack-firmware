@@ -1,7 +1,8 @@
 //  Collects sensors data and sends it to receiver board using ESP-NOW protocol.
-//  2021-05-02 by ELEMYO (https://github.com/ELEMYO/Elemyo-library)
+//  2024-11-19 by ELEMYO (https://github.com/ELEMYO/Elemyo-library)
 //
 //  Changelog:
+//  2024-11-19 - simple data compression added
 //  2021-05-02 - initial release
 //  
 
@@ -32,32 +33,22 @@ THE SOFTWARE.
 #include <Wire.h>
 
 // Read sensor data by I2C interface
-int sensorDataRead (byte Addr);
+void sensorDataRead (byte* dta, byte Addr);
 
 // Replace with receiver MAC address
-uint8_t receiverMACAddress[] = {0x7C, 0x9E, 0xBD, 0xF1, 0x4D, 0xB8};
+uint8_t receiverMACAddress[] = {0x34, 0x85, 0x18, 0x04, 0xC9, 0x58};
 
 // I2C addresses of sensors
 uint8_t sensorAddr [] = {0x50, 0x51, 0x52, 0x54, 0x55, 0x56, 0x58, 0x59, 0x5A};
 
-// One message data: 13 rows with 9 sensors data (234 bytes)
-short sensorsData[13][9] = {{0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0},
-                            {0, 0, 0, 0, 0, 0, 0, 0, 0}};
+// One message data: 27 rows with 9 sensors data (243 bytes)
+byte sensorsData[27][9];
+
+esp_now_peer_info_t peer; // peer information
 
 void setup() {
   Wire.begin(); // initiate the Wire library and join the I2C bus as a master
-  Wire.setClock(400000); // set clock frequency for I2C communication
+  Wire.setClock(530000); // set clock frequency for I2C communication
   delay(300);
  
   WiFi.mode(WIFI_STA); // set sender as a Wi-Fi Station
@@ -65,7 +56,6 @@ void setup() {
 
   esp_now_init(); // ESP-NOW initialisation
   
-  esp_now_peer_info_t peer; // peer information
   memcpy(peer.peer_addr, receiverMACAddress, 6);
   peer.channel = 0;  
   peer.encrypt = false;
@@ -74,28 +64,45 @@ void setup() {
 }
  
 void loop() {
-  // Updating message data: 13 rows with 9 sensors data
-  for (int i=0; i<13; i++)
+  while(1){
+  byte data[2];
+  
+  // Updating message data: 27 rows with 9 sensors data
+  for (int i=0; i<27; i=i+3)
   {
-    for (int j=0; j<9; j++)
-      sensorsData[i][j] = sensorDataRead(sensorAddr[j]);    
-    delayMicroseconds(1125); // delay between data read
+      for (int j=0; j<9; j++)
+      {
+        sensorDataRead(data, sensorAddr[j]);  
+        sensorsData[i][j] = data[0];
+        sensorsData[i+1][j] = data[1];
+      }
+      
+      for (int j=0; j<9; j++)
+      {
+        sensorDataRead(data, sensorAddr[j]);
+        sensorsData[i][j] = (data[0] << 4) | (sensorsData[i][j]);  
+        sensorsData[i+2][j] = data[1];
+      }
   }
   
   // Send message with sensors data to receiver
-  esp_err_t result = esp_now_send(receiverMACAddress, (uint8_t *) &sensorsData, sizeof(sensorsData));
+  esp_err_t result = esp_now_send(receiverMACAddress, (byte *) &sensorsData, sizeof(sensorsData));
+  }
 }
 
-int sensorDataRead (byte Addr)
+void sensorDataRead (byte* data, byte Addr)
 {
-  unsigned int data[2];
+  uint8_t bytesReceived = 0;
+
+  bytesReceived = Wire.requestFrom(Addr, 2, true);
   
-  Wire.requestFrom(Addr, 2);
-  
-  if(Wire.available() == 2)
+  if (bytesReceived == 2)
+    Wire.readBytes(data, bytesReceived);
+  else
   {
-    data[0] = Wire.read();
-    data[1] = Wire.read();
+    short ref = 2048;
+    data[0] = highByte(ref);
+    data[1] = lowByte(ref);
+    delayMicroseconds(62);
   }
-  return((data[0] & 0x0F) * 256) + data[1];
 }
