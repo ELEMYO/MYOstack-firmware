@@ -1,7 +1,8 @@
 //  Gets sensors data from sender and write them to Serial.
-//  2021-05-02 by ELEMYO (https://github.com/ELEMYO/Elemyo-library)
+//  2024-11-19 by ELEMYO (https://github.com/ELEMYO/Elemyo-library)
 //
 //  Changelog:
+//  2024-11-19 - simple data compression added
 //  2021-05-02 - initial release
 //  
 
@@ -30,27 +31,40 @@ THE SOFTWARE.
 #include <esp_now.h>
 #include <WiFi.h>
 
-// One message data: 13 rows with 9 sensors data (234 bytes)
-short sensorsData[13][9];
+// One message data: 27 rows with 9 sensors data (243 bytes)
+byte sensorsData[27][9];
 
 // callback function that will be executed when data is received
-void receivedMessage(const uint8_t * mac, const uint8_t *incomingData, int len) {
+void receivedMessage(const esp_now_recv_info_t * info, const uint8_t *incomingData, int len) {
   memcpy(&sensorsData, incomingData, sizeof(sensorsData));
 
   // Print sensors data to Serial Port
-  for (int i=0; i<13; i++)
+  for (int i=0; i<27; i=i+3)
   {
     for (int j=0; j<8; j++)
     {
-      Serial.print(sensorsData[i][j]);
+      short dat = ((sensorsData[i][j] & 0x0F)<<8) | (sensorsData[i+1][j] & 0xFF);
+      Serial.print(dat);
       Serial.print(";");
     }
-    Serial.println(sensorsData[i][8]);
+    
+    short dat = ((sensorsData[i][8] & 0x0F)<<8) | (sensorsData[i+1][8] & 0xFF);
+    Serial.println(dat);
+    
+    for (int j=0; j<8; j++)
+    {
+      short dat = (((sensorsData[i][j] >> 4) & 0x0F)<<8) | (sensorsData[i+2][j] & 0xFF);
+      Serial.print(dat);
+      Serial.print(";");
+    }
+    
+    dat = (((sensorsData[i][8] >> 4) & 0x0F)<<8) | (sensorsData[i+2][8] & 0xFF);
+    Serial.println(dat);
   }
 }
- 
+
 void setup() {
-  Serial.begin(1000000); // initialize Serial Monitor
+  Serial.begin(115200); // initialize Serial Monitor
   
   WiFi.mode(WIFI_STA); // set receiver as a Wi-Fi Station
 
